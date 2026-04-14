@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  polybot:
+    build: .
+    container_name: polybot
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1

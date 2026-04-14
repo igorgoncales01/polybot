@@ -33,7 +33,9 @@ TRAILING_TRIGGER = 0.03    # when price rises +3¢, move SL to breakeven
 
 logger = logging.getLogger("polybot.paper")
 
-TRADES_LOG = Path(__file__).parent / "paper_trades.json"
+# Use /app/data/ in Docker, local dir otherwise
+_data_dir = Path("/app/data") if Path("/app/data").exists() else Path(__file__).parent
+TRADES_LOG = _data_dir / "paper_trades.json"
 
 
 @dataclass
