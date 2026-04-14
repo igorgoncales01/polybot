@@ -99,6 +99,15 @@
   .pos-bar-tp  { position: absolute; top: 0; height: 100%; background: rgba(0,229,160,0.35); border-radius: 0 3px 3px 0; }
   .pos-dot     { position: absolute; top: -2px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); transform: translateX(-50%); transition: left 0.4s; }
   .pos-labels  { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); margin-top: 3px; }
+  /* Tooltip */
+  .tt { position: fixed; z-index: 999; background: #1a2030; border: 1px solid var(--border2); border-radius: 4px; padding: 10px 12px; font-size: 10px; color: var(--text); pointer-events: none; opacity: 0; transition: opacity 0.15s; min-width: 200px; max-width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  .tt.show { opacity: 1; }
+  .tt-title { font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 8px; line-height: 1.3; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .tt-row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .tt-key { color: var(--muted2); }
+  .tt-val { color: var(--text); font-weight: 500; }
+  .tt-val.up { color: var(--green); }
+  .tt-val.dn { color: var(--red); }
   /* Category breakdown */
   .cat-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
   .cat-table td { padding: 3px 4px; border-bottom: 1px solid var(--border); color: var(--muted2); }
@@ -108,6 +117,7 @@
 </head>
 <body>
 
+<div class="tt" id="tooltip"></div>
 <div class="header">
   <div class="logo">
     <div class="dot-live" id="live-dot"></div>
@@ -327,6 +337,41 @@ function drawChart(){
   pnlCtx.fillStyle=col; pnlCtx.fill();
 }
 
+var tt = document.getElementById('tooltip');
+function showTooltip(e, p) {
+  var hold = p.hold_seconds < 60 ? Math.round(p.hold_seconds)+'s'
+           : p.hold_seconds < 3600 ? Math.round(p.hold_seconds/60)+'m'
+           : (p.hold_seconds/3600).toFixed(1)+'h';
+  var pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100).toFixed(1) : '0';
+  var pnlCol = p.unrealized_pnl >= 0 ? 'up' : 'dn';
+  var pnlStr = (p.unrealized_pnl >= 0 ? '+$' : '-$') + Math.abs(p.unrealized_pnl).toFixed(2);
+  var distToTP = (p.tp_price - p.current_price).toFixed(1);
+  var distToSL = (p.current_price - p.sl_price).toFixed(1);
+  var rr = distToSL > 0 ? (distToTP / distToSL).toFixed(2) : '--';
+  tt.innerHTML =
+    '<div class="tt-title">' + p.question + '</div>' +
+    '<div class="tt-row"><span class="tt-key">Outcome</span><span class="tt-val">' + p.outcome + '</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Shares</span><span class="tt-val">' + p.shares + '</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Tamanho</span><span class="tt-val">$' + p.size_usd.toFixed(0) + '</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Entrada</span><span class="tt-val">' + p.entry_price + 'c</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Atual</span><span class="tt-val">' + p.current_price + 'c (' + (pnlPct > 0 ? '+' : '') + pnlPct + '%)</span></div>' +
+    '<div class="tt-row"><span class="tt-key">P&L</span><span class="tt-val ' + pnlCol + '">' + pnlStr + '</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Dist. TP</span><span class="tt-val up">+' + distToTP + 'c</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Dist. SL</span><span class="tt-val dn">-' + distToSL + 'c</span></div>' +
+    '<div class="tt-row"><span class="tt-key">R/R ratio</span><span class="tt-val">' + rr + '</span></div>' +
+    '<div class="tt-row"><span class="tt-key">Aberta há</span><span class="tt-val">' + hold + '</span></div>';
+  tt.classList.add('show');
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  var x = e.clientX + 14, y = e.clientY + 14;
+  if (x + 290 > window.innerWidth) x = e.clientX - 295;
+  if (y + 260 > window.innerHeight) y = e.clientY - 265;
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+function hideTooltip() { tt.classList.remove('show'); }
+
 function switchTab(tab){
   document.getElementById('tab-open').className='tab-btn'+(tab==='open'?' active':'');
   document.getElementById('tab-closed').className='tab-btn'+(tab==='closed'?' active':'');
@@ -351,6 +396,10 @@ function renderTable(d){
     var row=document.createElement('tr');
     var icon = sportIcon(p.category);
     row.innerHTML='<td class="market" title="'+p.question+'">'+icon+' '+p.outcome+' - '+p.question.slice(0,30)+'</td><td><span class="cat-badge">'+p.category+'</span></td><td><span class="badge badge-buy">OPEN</span></td><td class="price">'+p.entry_price+'c &rarr; '+p.current_price+'c</td><td>$'+p.size_usd.toFixed(0)+'</td><td class="'+pnlClass+'">'+pnlStr+'</td><td style="color:var(--muted2);font-size:10px;">TP '+p.tp_price+'c SL '+p.sl_price+'c ('+hold+')</td>';
+    row.style.cursor='pointer';
+    row.addEventListener('mouseenter', function(e){ showTooltip(e, p); });
+    row.addEventListener('mousemove', moveTooltip);
+    row.addEventListener('mouseleave', hideTooltip);
     tbody.appendChild(row);
     // Progress bar row: SL ---[current]--- TP
     var sl=p.sl_price, tp=p.tp_price, cur=p.current_price, en=p.entry_price;
