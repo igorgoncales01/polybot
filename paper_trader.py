@@ -48,6 +48,7 @@ class PaperPosition:
     shares: float
     entry_time: float
     category: str
+    condition_id: str = ""
     tp_price: float = 0.0
     sl_price: float = 0.0
     high_water: float = 0.0  # highest price seen (for trailing stop)
@@ -130,6 +131,7 @@ class PaperTrader:
                         timestamp=time.time(), hold_seconds=round(hold, 1),
                     ))
                     del self.positions[tid]
+                    self.traded_conditions.discard(pos.condition_id)
                     self._low_price_strikes.pop(tid, None)
                     logger.info("EXPIRED %s: price=%.2f¢ pnl=$%.2f", pos.outcome, current_price * 100, pnl)
                     events.append({"type": "SELL", "reason": "MARKET_EXPIRED", "outcome": pos.outcome,
@@ -194,6 +196,7 @@ class PaperTrader:
                 )
                 self.trades.append(trade)
                 del self.positions[tid]
+                self.traded_conditions.discard(pos.condition_id)
 
                 spread_info = f"spread={book.spread*100:.1f}¢" if book else "no-book"
                 events.append({
@@ -375,6 +378,7 @@ class PaperTrader:
                     shares=round(shares, 2),
                     entry_time=time.time(),
                     category=cand.category,
+                    condition_id=cand.condition_id,
                 )
                 # Apply dynamic TP
                 pos.tp_price = entry_price + dynamic_tp
@@ -507,6 +511,7 @@ class PaperTrader:
                         "shares": p.shares,
                         "entry_time": p.entry_time,
                         "category": p.category,
+                        "condition_id": p.condition_id,
                     }
                     for tid, p in self.positions.items()
                 },
