@@ -30,7 +30,9 @@ MAX_SPREAD_CENTS = 5.0    # max 5¢ spread
 MAX_SLIPPAGE_PCT = 8.0    # max 8% slippage on simulated fill
 MAX_ENTRIES_PER_MARKET = 2 # max reentries on same market/side
 TRAILING_TRIGGER = 0.03    # when price rises +3¢, move SL to breakeven
-REENTRY_COOLDOWN = 120     # seconds to wait after closing before re-entering same market
+REENTRY_COOLDOWN = 300     # seconds to wait after closing before re-entering same market
+ESPORTS_CATS = {"cs2", "lol", "dota2", "valorant"}  # esports categories
+MAP_BLOCK_KEYWORDS = ("handicap", "- map")  # block map-specific esports markets
 
 logger = logging.getLogger("polybot.paper")
 
@@ -259,6 +261,7 @@ class PaperTrader:
                 and MIN_PRICE <= c.price <= MAX_PRICE
                 and self.entry_counts.get(c.question[:50], 0) < MAX_ENTRIES_PER_MARKET  # limit reentries
                 and (time.time() - self._close_cooldowns.get(c.question[:50], 0)) > REENTRY_COOLDOWN  # cooldown após fechar
+                and not (c.category in ESPORTS_CATS and any(k in c.question.lower() for k in MAP_BLOCK_KEYWORDS))  # block map-specific esports
             ]
             eligible.sort(key=lambda c: c.price)
 
@@ -389,6 +392,11 @@ class PaperTrader:
                 # Recalculate fill with new size
                 avg_fill, shares = simulate_buy_fill(book, size_usd)
                 if avg_fill == 0 or shares == 0:
+                    continue
+
+                # Re-validate price at execution time (orderbook price may differ from scan price)
+                if avg_fill < MIN_PRICE:
+                    logger.info("SKIP %s: fill price %.3f below MIN_PRICE %.2f", cand.outcome, avg_fill, MIN_PRICE)
                     continue
 
                 entry_price = avg_fill
