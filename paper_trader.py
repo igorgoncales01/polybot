@@ -87,6 +87,7 @@ class PaperTrader:
         self.scan_count = 0
         self.entry_counts: dict[str, int] = {}  # question -> count of entries
         self.traded_conditions: set[str] = set()  # condition_ids already traded (persist across restarts)
+        self._low_price_strikes: dict[str, int] = {}  # token_id -> consecutive scans below 1¢
         self.feed = PriceFeed()
         self.feed.start()
         self._load_trades()
@@ -112,6 +113,30 @@ class PaperTrader:
             current_price = ws_price.mid if ws_price else 0
             if not current_price:
                 continue  # no WS data yet, skip
+
+            # ── MARKET EXPIRED: close if price < 1¢ for 2+ consecutive scans ──
+            if current_price < 0.01:
+                self._low_price_strikes[tid] = self._low_price_strikes.get(tid, 0) + 1
+                if self._low_price_strikes[tid] >= 2:
+                    pnl = (current_price * pos.shares) - pos.size_usd
+                    self.balance += pos.size_usd + pnl
+                    hold = time.time() - pos.entry_time
+                    self.trades.append(PaperTrade(
+                        token_id=tid, question=pos.question, outcome=pos.outcome,
+                        category=pos.category, action="SELL",
+                        entry_price=pos.entry_price, exit_price=current_price,
+                        size_usd=pos.size_usd, shares=pos.shares,
+                        pnl=round(pnl, 4), reason="MARKET_EXPIRED",
+                        timestamp=time.time(), hold_seconds=round(hold, 1),
+                    ))
+                    del self.positions[tid]
+                    self._low_price_strikes.pop(tid, None)
+                    logger.info("EXPIRED %s: price=%.2f¢ pnl=$%.2f", pos.outcome, current_price * 100, pnl)
+                    events.append({"type": "SELL", "reason": "MARKET_EXPIRED", "outcome": pos.outcome,
+                                   "question": pos.question[:50], "pnl": round(pnl, 2)})
+                continue
+            else:
+                self._low_price_strikes.pop(tid, None)  # reset counter if price recovers
 
             # ── TRAILING STOP: update high water mark ──
             if current_price > pos.high_water:
