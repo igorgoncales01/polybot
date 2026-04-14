@@ -226,7 +226,7 @@ POLY_TO_ODDS_SPORT = {
     # Baseball
     "mlb": "baseball_mlb",
     # Other
-    "nfl": "americanfootball_nfl_super_bowl_winner",
+    "nfl": "americanfootball_nfl",
     "golf": "golf_pga_championship_winner",
     "rugby": "rugbyleague_nrl",
     # Team-name triggers (fallback)

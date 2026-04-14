@@ -86,6 +86,7 @@ class PaperTrader:
         self.trades: list[PaperTrade] = []
         self.scan_count = 0
         self.entry_counts: dict[str, int] = {}  # question -> count of entries
+        self.traded_conditions: set[str] = set()  # condition_ids already traded (persist across restarts)
         self.feed = PriceFeed()
         self.feed.start()
         self._load_trades()
@@ -193,20 +194,18 @@ class PaperTrader:
         price_map = {c.token_id: c for c in candidates}
 
         # 3. Open new positions (with edge detection + orderbook analysis)
-        # Build set of condition_ids we already have positions in (prevent 2-side bug)
-        owned_conditions = set()
+        # Build set of condition_ids currently in positions (add to persisted set)
         for tid, pos in self.positions.items():
-            # Extract condition_id from candidates if available
             for c in candidates:
                 if c.token_id == tid:
-                    owned_conditions.add(c.condition_id)
+                    self.traded_conditions.add(c.condition_id)
                     break
 
         if len(self.positions) < MAX_OPEN_POSITIONS:
             eligible = [
                 c for c in candidates
                 if c.token_id not in self.positions
-                and c.condition_id not in owned_conditions  # FIX: don't buy both sides
+                and c.condition_id not in self.traded_conditions  # never trade both sides
                 and MIN_PRICE <= c.price <= MAX_PRICE
                 and self.entry_counts.get(c.question[:50], 0) < MAX_ENTRIES_PER_MARKET  # limit reentries
             ]
@@ -356,8 +355,8 @@ class PaperTrader:
                 pos.tp_price = entry_price + dynamic_tp
                 self.positions[cand.token_id] = pos
                 self.balance -= size_usd
-                # Track condition to prevent buying other side
-                owned_conditions.add(cand.condition_id)
+                # Track condition permanently (persists across restarts)
+                self.traded_conditions.add(cand.condition_id)
                 # Track entry count to limit reentries
                 mkt_key = cand.question[:50]
                 self.entry_counts[mkt_key] = self.entry_counts.get(mkt_key, 0) + 1
@@ -472,6 +471,7 @@ class PaperTrader:
                 "balance": self.balance,
                 "initial_balance": self.starting_balance,
                 "trades": [asdict(t) for t in self.trades],
+                "traded_conditions": list(self.traded_conditions),
                 "positions": {
                     tid: {
                         "token_id": p.token_id,
@@ -501,6 +501,7 @@ class PaperTrader:
                 self.trades.append(PaperTrade(**td))
             for tid, pd in data.get("positions", {}).items():
                 self.positions[tid] = PaperPosition(**pd)
+            self.traded_conditions = set(data.get("traded_conditions", []))
             logger.info(
                 "Loaded %d trades, %d positions, balance=$%.2f",
                 len(self.trades), len(self.positions), self.balance,
@@ -513,6 +514,7 @@ class PaperTrader:
         self.balance = self.starting_balance
         self.positions.clear()
         self.trades.clear()
+        self.traded_conditions.clear()
         self.scan_count = 0
         self.feed.unsubscribe_all()
         # Wipe the file
@@ -520,6 +522,7 @@ class PaperTrader:
             "balance": self.starting_balance,
             "initial_balance": self.starting_balance,
             "trades": [],
+            "traded_conditions": [],
             "positions": {},
         }
         TRADES_LOG.write_text(json.dumps(data, indent=2))
