@@ -92,11 +92,13 @@ class PaperTrader:
         self.feed = PriceFeed()
         self.feed.start()
         self._load_trades()
-        # Rebuild entry counts from trade history
+        # Rebuild entry counts — reset on win, so profitable markets allow re-entry
         for t in self.trades:
+            key = t.question[:50]
             if t.action == "BUY":
-                key = t.question[:50]
                 self.entry_counts[key] = self.entry_counts.get(key, 0) + 1
+            elif t.action == "SELL" and t.pnl > 0:
+                self.entry_counts[key] = 0  # win resets counter
         # Re-subscribe existing positions
         if self.positions:
             self.feed.subscribe(list(self.positions.keys()))
@@ -197,6 +199,8 @@ class PaperTrader:
                 self.trades.append(trade)
                 del self.positions[tid]
                 self.traded_conditions.discard(pos.condition_id)
+                if pnl > 0:
+                    self.entry_counts[pos.question[:50]] = 0  # win resets counter
 
                 spread_info = f"spread={book.spread*100:.1f}¢" if book else "no-book"
                 events.append({
