@@ -14,6 +14,7 @@ from orderbook import fetch_orderbook, simulate_buy_fill, simulate_sell_fill, ch
 from ws_feed import PriceFeed
 from edge_detector import check_edge, EdgeSignal
 from kelly import kelly_size
+from live_scores import score_cache, SOCCER_CATEGORIES
 from config import (
     BOUNCE_TARGET,
     STOP_LOSS,
@@ -361,6 +362,15 @@ class PaperTrader:
                         cand.outcome, momentum,
                     )
                     continue
+
+                # ── LIVE SCORE GUARD: skip soccer if match has a goal ──
+                if cand.category in SOCCER_CATEGORIES:
+                    if score_cache.is_live_with_goal(cand.question, cand.category):
+                        logger.info(
+                            "SKIP %s: soccer live with goal (pre-match odds stale)",
+                            cand.outcome,
+                        )
+                        continue
 
                 # ── DYNAMIC TP: scale with edge size ──
                 dynamic_tp = max(BOUNCE_TARGET, edge_signal.edge_cents / 100 / 3)
