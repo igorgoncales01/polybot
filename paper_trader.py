@@ -13,6 +13,7 @@ from scanner import scan_markets, Candidate
 from orderbook import fetch_orderbook, simulate_buy_fill, simulate_sell_fill, check_liquidity, analyze_order_flow
 from ws_feed import PriceFeed
 from edge_detector import check_edge, EdgeSignal
+from kelly import kelly_size
 from config import (
     BOUNCE_TARGET,
     STOP_LOSS,
@@ -309,13 +310,26 @@ class PaperTrader:
                 # ── DYNAMIC TP: scale with edge size ──
                 dynamic_tp = max(BOUNCE_TARGET, edge_signal.edge_cents / 100 / 3)
 
-                # ── DYNAMIC POSITION SIZE: bigger edge = bigger bet ──
-                if edge_signal.edge_cents >= 15:
-                    size_usd = min(MAX_POSITION_USD * 2, self.balance * 0.03)  # up to 2x
-                elif edge_signal.edge_cents >= 10:
-                    size_usd = MAX_POSITION_USD * 1.5
+                # ── TIME DECAY: prefer markets ending soon (faster resolution) ──
+                hours_left = cand.hours_to_end if hasattr(cand, 'hours_to_end') else 48
+                if hours_left <= 2:
+                    time_bonus = 1.5  # 50% bigger bet for imminent markets
+                elif hours_left <= 6:
+                    time_bonus = 1.2
                 else:
-                    size_usd = MAX_POSITION_USD
+                    time_bonus = 1.0
+
+                # ── KELLY CRITERION: optimal bet size ──
+                kelly_bet = kelly_size(
+                    fair_price=edge_signal.fair_price,
+                    poly_price=cand.price,
+                    bankroll=self.balance,
+                )
+                if kelly_bet > 0:
+                    size_usd = round(kelly_bet * time_bonus, 2)
+                else:
+                    size_usd = MAX_POSITION_USD  # fallback
+
                 size_usd = round(min(size_usd, self.balance - 100), 2)  # keep $100 reserve
                 if size_usd < 10:
                     continue

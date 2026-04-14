@@ -69,6 +69,7 @@ class Candidate:
     category: str
     volume_24h: float = 0
     end_date: str = ""
+    hours_to_end: float = 48
 
 
 def _fetch_gamma_page(offset: int = 0, limit: int = 100) -> list[dict]:
@@ -136,7 +137,17 @@ def _extract_candidates(market: dict, min_liq: float = 0) -> list[Candidate]:
         return []
 
     volume_24h = float(market.get("volume24hr") or market.get("volume24hrClob") or 0)
-    end_date = (market.get("endDateIso") or market.get("endDate") or "")[:10]
+    end_date_raw = market.get("endDateIso") or market.get("endDate") or ""
+    end_date = end_date_raw[:10]
+    # Calculate hours to end
+    hours_to_end = 48.0
+    if end_date_raw:
+        try:
+            from datetime import datetime, timezone
+            end_dt = datetime.fromisoformat(end_date_raw.replace("Z", "+00:00"))
+            hours_to_end = max(0, (end_dt - datetime.now(timezone.utc)).total_seconds() / 3600)
+        except Exception:
+            pass
 
     try:
         outcome_prices = json.loads(market.get("outcomePrices") or "[]")
@@ -172,6 +183,7 @@ def _extract_candidates(market: dict, min_liq: float = 0) -> list[Candidate]:
                         category=slug.split("-")[0] if slug else "",
                         volume_24h=volume_24h,
                         end_date=end_date,
+                        hours_to_end=hours_to_end,
                     )
                 )
     return candidates
