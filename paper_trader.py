@@ -30,7 +30,7 @@ MAX_SPREAD_CENTS = 5.0    # max 5¢ spread
 MAX_SLIPPAGE_PCT = 8.0    # max 8% slippage on simulated fill
 MAX_ENTRIES_PER_MARKET = 2 # max reentries on same market/side
 TRAILING_TRIGGER = 0.03    # when price rises +3¢, move SL to breakeven
-REENTRY_COOLDOWN = 300     # seconds to wait after closing before re-entering same market
+REENTRY_COOLDOWN = 120     # seconds to wait after closing before re-entering same market
 
 logger = logging.getLogger("polybot.paper")
 
