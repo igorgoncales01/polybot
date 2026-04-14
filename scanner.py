@@ -24,6 +24,18 @@ logger = logging.getLogger("polybot.scanner")
 
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
+# Sport tags to query via the /events endpoint (supplements regular scan)
+EVENTS_SPORT_TAGS = ["nba", "nhl", "tennis", "baseball", "mma"]
+
+# Keywords that indicate non-moneyline markets (O/U, spreads, prop bets)
+EVENTS_SKIP_KW = (
+    "o/u", "over/under", "spread", "handicap",
+    "1h ", "2h ", "quarter", "1st half", "2nd half",
+    "points o/u", "assists o/u", "rebounds o/u",
+    "- game 1", "- game 2", "- map",
+    "set 1 ", "set 2 ", "set handicap", "set winner",
+)
+
 # Extended keywords to match sport slugs/questions
 SPORT_KEYWORDS = [
     # Soccer
@@ -121,7 +133,45 @@ def _is_live_market(market: dict) -> bool:
         return False
 
 
-def _extract_candidates(market: dict, min_liq: float = 0) -> list[Candidate]:
+def _fetch_events_by_tags() -> list[dict]:
+    """Fetch markets nested inside sport events via /events?tag_slug=.
+    Covers scheduled matches (NBA, NHL, Tennis, Baseball, MMA) that the
+    regular /markets pagination often misses.
+    """
+    markets: list[dict] = []
+    seen_conditions: set[str] = set()
+
+    for tag in EVENTS_SPORT_TAGS:
+        try:
+            resp = httpx.get(
+                f"{GAMMA_API_URL}/events",
+                params={"active": "true", "closed": "false", "limit": 100, "tag_slug": tag},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            events = resp.json()
+        except httpx.HTTPError as exc:
+            logger.warning("Events fetch tag=%s failed: %s", tag, exc)
+            continue
+
+        for event in events:
+            for m in event.get("markets", []):
+                cond = m.get("conditionId", "")
+                if not cond or cond in seen_conditions:
+                    continue
+                q = (m.get("question") or "").lower()
+                if any(k in q for k in EVENTS_SKIP_KW):
+                    continue
+                # Tag the market with sport category for proper classification
+                m["_events_tag"] = tag
+                seen_conditions.add(cond)
+                markets.append(m)
+
+    logger.debug("Events API: fetched %d unique moneyline markets", len(markets))
+    return markets
+
+
+def _extract_candidates(market: dict, min_liq: float = 0, category_override: str = "") -> list[Candidate]:
     """Return qualifying underdog outcomes from a Gamma market."""
     candidates: list[Candidate] = []
     condition_id = market.get("conditionId") or market.get("condition_id", "")
@@ -172,6 +222,7 @@ def _extract_candidates(market: dict, min_liq: float = 0) -> list[Candidate]:
             token_id = token_ids[i] if i < len(token_ids) else ""
             outcome = outcomes[i] if i < len(outcomes) else f"Outcome {i}"
             if token_id:
+                category = category_override or (slug.split("-")[0] if slug else "")
                 candidates.append(
                     Candidate(
                         condition_id=condition_id,
@@ -180,7 +231,7 @@ def _extract_candidates(market: dict, min_liq: float = 0) -> list[Candidate]:
                         outcome=str(outcome),
                         price=price,
                         liquidity=liquidity,
-                        category=slug.split("-")[0] if slug else "",
+                        category=category,
                         volume_24h=volume_24h,
                         end_date=end_date,
                         hours_to_end=hours_to_end,
@@ -263,11 +314,22 @@ def scan_markets(max_pages: int = 10) -> list[Candidate]:
         if len(markets) < page_size:
             break
 
+    # Pass 3: Events API — scheduled sports (NBA, NHL, Tennis, Baseball, MMA)
+    events_markets = _fetch_events_by_tags()
+    events_count = 0
+    for market in events_markets:
+        tag = market.get("_events_tag", "")
+        for c in _extract_candidates(market, min_liq=MIN_LIQUIDITY, category_override=tag):
+            if c.token_id not in seen_tokens:
+                seen_tokens.add(c.token_id)
+                all_candidates.append(c)
+                events_count += 1
+
     # Sort: highest volume first (live/hot markets get priority)
     all_candidates.sort(key=lambda c: -c.volume_24h)
 
     logger.info(
-        "Scan: %d hot + %d total candidates (deduped)",
-        hot_count, len(all_candidates),
+        "Scan: %d hot + %d events + %d total candidates (deduped)",
+        hot_count, events_count, len(all_candidates),
     )
     return all_candidates
