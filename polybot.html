@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PolyBot v2.5 — Paper Trading</title>
+<title>PolyBot v2.6 — Paper Trading</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -92,6 +92,18 @@
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  /* Position progress bar */
+  .pos-progress-wrap { padding: 2px 8px 6px; }
+  .pos-progress { position: relative; height: 6px; background: var(--border); border-radius: 3px; margin-top: 2px; }
+  .pos-bar-sl  { position: absolute; left: 0; top: 0; height: 100%; background: rgba(255,77,109,0.35); border-radius: 3px 0 0 3px; }
+  .pos-bar-tp  { position: absolute; top: 0; height: 100%; background: rgba(0,229,160,0.35); border-radius: 0 3px 3px 0; }
+  .pos-dot     { position: absolute; top: -2px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); transform: translateX(-50%); transition: left 0.4s; }
+  .pos-labels  { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); margin-top: 3px; }
+  /* Category breakdown */
+  .cat-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+  .cat-table td { padding: 3px 4px; border-bottom: 1px solid var(--border); color: var(--muted2); }
+  .cat-table td:first-child { color: var(--text); }
+  .cat-table td:last-child { text-align: right; }
 </style>
 </head>
 <body>
@@ -99,7 +111,7 @@
 <div class="header">
   <div class="logo">
     <div class="dot-live" id="live-dot"></div>
-    POLY·BOT v2.5 <span class="paper-badge">PAPER</span>
+    POLY·BOT v2.6 <span class="paper-badge">PAPER</span>
   </div>
   <div class="status-bar">
     <span id="hdr-trades">TRADES: <span>0</span></span>
@@ -214,6 +226,12 @@
       <div class="stat-row"><span class="stat-row-key">Profit factor</span><span class="stat-row-val neu" id="s-pf">--</span></div>
       <div class="stat-row"><span class="stat-row-key">Saldo atual</span><span class="stat-row-val neu" id="s-recycled">$1,000</span></div>
     </div>
+    <div class="stat-block">
+      <div class="stat-title">Por categoria</div>
+      <table class="cat-table" id="cat-table">
+        <tr><td colspan="4" style="color:var(--muted);text-align:center;">Sem dados</td></tr>
+      </table>
+    </div>
     <div class="panel-title">Log do sistema</div>
     <div class="log-box" id="log-box"></div>
   </div>
@@ -261,14 +279,36 @@ function initChart(){
   c.width=c.offsetWidth||240; c.height=c.offsetHeight||104;
   pnlCtx=c.getContext('2d');
 }
+
+function buildEquityFromHistory(d){
+  var start=d.starting_balance||10000;
+  var trades=(d.closed_trades||[]).slice().sort(function(a,b){return a.timestamp-b.timestamp;});
+  var points=[start];
+  var bal=start;
+  trades.forEach(function(t){ bal+=t.pnl; points.push(bal); });
+  return points;
+}
+
 function drawChart(){
   if(!pnlCtx)return;
   var w=pnlCtx.canvas.width, h=pnlCtx.canvas.height;
   pnlCtx.clearRect(0,0,w,h);
   var data=state.pnlHistory;
-  if(data.length<2){ pnlCtx.fillStyle='#1e2530'; pnlCtx.fillRect(0,h/2-0.5,w,1); return; }
-  var min=Math.min.apply(null,data), max=Math.max.apply(null,data), range=max-min||1, pad=8;
-  var col=data[data.length-1]>=0?'#00e5a0':'#ff4d6d';
+  if(data.length<2){
+    pnlCtx.strokeStyle='#1e2530'; pnlCtx.lineWidth=1;
+    pnlCtx.beginPath(); pnlCtx.moveTo(0,h/2); pnlCtx.lineTo(w,h/2); pnlCtx.stroke();
+    return;
+  }
+  var min=Math.min.apply(null,data), max=Math.max.apply(null,data), range=max-min||1, pad=10;
+  var last=data[data.length-1], start=data[0];
+  var col=last>=start?'#00e5a0':'#ff4d6d';
+  // baseline (starting balance)
+  var baseY=h-pad-((start-min)/range)*(h-pad*2);
+  pnlCtx.strokeStyle='rgba(255,255,255,0.06)'; pnlCtx.lineWidth=1;
+  pnlCtx.setLineDash([3,3]);
+  pnlCtx.beginPath(); pnlCtx.moveTo(pad,baseY); pnlCtx.lineTo(w-pad,baseY); pnlCtx.stroke();
+  pnlCtx.setLineDash([]);
+  // equity line
   pnlCtx.beginPath(); pnlCtx.strokeStyle=col; pnlCtx.lineWidth=1.5;
   data.forEach(function(v,i){
     var x=pad+(i/(data.length-1))*(w-pad*2);
@@ -276,9 +316,15 @@ function drawChart(){
     i===0?pnlCtx.moveTo(x,y):pnlCtx.lineTo(x,y);
   });
   pnlCtx.stroke();
-  pnlCtx.lineTo(pad+(w-pad*2),h-pad); pnlCtx.lineTo(pad,h-pad); pnlCtx.closePath();
-  pnlCtx.fillStyle=data[data.length-1]>=0?'rgba(0,229,160,0.08)':'rgba(255,77,109,0.08)';
+  // fill
+  var lastX=pad+((data.length-1)/(data.length-1))*(w-pad*2);
+  pnlCtx.lineTo(lastX,h-pad); pnlCtx.lineTo(pad,h-pad); pnlCtx.closePath();
+  pnlCtx.fillStyle=last>=start?'rgba(0,229,160,0.07)':'rgba(255,77,109,0.07)';
   pnlCtx.fill();
+  // end dot
+  var ex=w-pad, ey=h-pad-((last-min)/range)*(h-pad*2);
+  pnlCtx.beginPath(); pnlCtx.arc(ex,ey,3,0,Math.PI*2);
+  pnlCtx.fillStyle=col; pnlCtx.fill();
 }
 
 function switchTab(tab){
@@ -306,6 +352,22 @@ function renderTable(d){
     var icon = sportIcon(p.category);
     row.innerHTML='<td class="market" title="'+p.question+'">'+icon+' '+p.outcome+' - '+p.question.slice(0,30)+'</td><td><span class="cat-badge">'+p.category+'</span></td><td><span class="badge badge-buy">OPEN</span></td><td class="price">'+p.entry_price+'c &rarr; '+p.current_price+'c</td><td>$'+p.size_usd.toFixed(0)+'</td><td class="'+pnlClass+'">'+pnlStr+'</td><td style="color:var(--muted2);font-size:10px;">TP '+p.tp_price+'c SL '+p.sl_price+'c ('+hold+')</td>';
     tbody.appendChild(row);
+    // Progress bar row: SL ---[current]--- TP
+    var sl=p.sl_price, tp=p.tp_price, cur=p.current_price, en=p.entry_price;
+    var range=tp-sl||1;
+    var entryPct=Math.max(0,Math.min(100,((en-sl)/range)*100));
+    var curPct=Math.max(0,Math.min(100,((cur-sl)/range)*100));
+    var dotColor=cur>=en?'#00e5a0':'#ff4d6d';
+    var barRow=document.createElement('tr');
+    barRow.innerHTML='<td colspan="7" class="pos-progress-wrap">'
+      +'<div class="pos-progress">'
+      +'<div class="pos-bar-sl" style="width:'+entryPct+'%"></div>'
+      +'<div class="pos-bar-tp" style="left:'+entryPct+'%;width:'+(100-entryPct)+'%"></div>'
+      +'<div class="pos-dot" style="left:'+curPct+'%;background:'+dotColor+'"></div>'
+      +'</div>'
+      +'<div class="pos-labels"><span>SL '+sl+'c</span><span>entry '+en+'c</span><span>TP '+tp+'c</span></div>'
+      +'</td>';
+    tbody.appendChild(barRow);
   });
 
   if(!positions.length){
@@ -333,6 +395,30 @@ function renderTable(d){
   if(!closed.length){
     cbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Nenhum trade fechado ainda</td></tr>';
   }
+}
+
+function renderCategoryStats(d){
+  var closed=d.closed_trades||[];
+  var cats={};
+  closed.forEach(function(t){
+    var c=t.category||'other';
+    if(!cats[c]) cats[c]={w:0,l:0,pnl:0};
+    if(t.pnl>0) cats[c].w++; else cats[c].l++;
+    cats[c].pnl+=t.pnl;
+  });
+  var keys=Object.keys(cats).sort(function(a,b){return cats[b].pnl-cats[a].pnl;});
+  var tbl=document.getElementById('cat-table');
+  if(!keys.length){ tbl.innerHTML='<tr><td colspan="4" style="color:var(--muted);text-align:center;">Sem dados</td></tr>'; return; }
+  tbl.innerHTML='<tr style="color:var(--muted);font-size:9px;"><td>CAT</td><td style="text-align:center;">W/L</td><td style="text-align:center;">WIN%</td><td>PnL</td></tr>';
+  keys.forEach(function(c){
+    var s=cats[c];
+    var total=s.w+s.l;
+    var wr=total?Math.round(s.w/total*100):0;
+    var pnlStr=(s.pnl>=0?'+$':'-$')+Math.abs(s.pnl).toFixed(0);
+    var pnlCol=s.pnl>=0?'var(--green)':'var(--red)';
+    var icon=sportIcon(c);
+    tbl.innerHTML+='<tr><td>'+icon+' '+c+'</td><td style="text-align:center;">'+s.w+'/'+s.l+'</td><td style="text-align:center;">'+wr+'%</td><td style="color:'+pnlCol+';text-align:right;">'+pnlStr+'</td></tr>';
+  });
 }
 
 function updateDashboard(d){
@@ -370,10 +456,10 @@ function updateDashboard(d){
   document.getElementById('s-tp').textContent='+'+cfg('cfg-tp')+'c';
   document.getElementById('s-sl').textContent='-'+cfg('cfg-sl')+'c';
 
-  state.pnlHistory.push(totalPnl+openPnl);
-  if(state.pnlHistory.length>60) state.pnlHistory.shift();
+  state.pnlHistory = buildEquityFromHistory(d);
   drawChart();
   renderTable(d);
+  renderCategoryStats(d);
 
   var el=document.getElementById('scan-status');
   el.textContent='PAPER #'+(d.scan_count||0)+' ('+nOpen+' open)';
@@ -436,7 +522,7 @@ async function closeAll(){
 
 window.addEventListener('load',function(){
   initChart();
-  log('PolyBot v2.5 - PAPER TRADING','info');
+  log('PolyBot v2.6 - PAPER TRADING','info');
   log('Kelly + Trailing Stop + Edge Detection + Time Decay','info');
   log('Precos reais da Polymarket, saldo simulado $10,000','info');
   // Auto-sync state with server on page load
