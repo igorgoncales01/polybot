@@ -55,7 +55,10 @@ _CSV_FIELDS = [
 ]
 
 # Soccer tag slugs to scan on Polymarket
-_SOCCER_TAGS = ["ucl", "epl", "soccer", "la-liga", "bundesliga", "serie-a"]
+_SOCCER_TAGS = [
+    "ucl", "epl", "soccer", "la-liga", "bundesliga", "serie-a",
+    "ligue-one", "europa-league", "mls", "conference-league",
+]
 
 
 # ── Data ───────────────────────────────────────────────────────────────────
