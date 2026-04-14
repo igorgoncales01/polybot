@@ -31,6 +31,7 @@ class SMFixture:
     home_xg: float
     away_xg: float
     last_goal_minute: int  # minute of latest goal, 0 if none
+    game_date: str = ""    # "YYYY-MM-DD" of the fixture
 
     @property
     def score_str(self) -> str:
@@ -222,6 +223,10 @@ class SportMonksClient:
                 if m > last_goal_minute:
                     last_goal_minute = m
 
+        # Parse game date from starting_at field ("2026-04-15 19:00:00")
+        starting_at = f.get("starting_at", "")
+        game_date = starting_at[:10] if starting_at else ""
+
         return SMFixture(
             fixture_id=fid,
             home_team=home_team,
@@ -233,6 +238,7 @@ class SportMonksClient:
             home_xg=home_xg,
             away_xg=away_xg,
             last_goal_minute=last_goal_minute,
+            game_date=game_date,
         )
 
 

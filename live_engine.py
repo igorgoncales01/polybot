@@ -18,6 +18,7 @@ import os
 import sys
 import threading
 import time
+import unicodedata
 from dataclasses import asdict, dataclass
 
 import httpx
@@ -139,8 +140,14 @@ class LiveEngine:
 
         candidates: list[dict] = []
         seen: set[str] = set()
-        skip_kw = ("spread", "handicap", "draw", "both teams", "score first",
-                   "o/u", "over/under", "1h ", "2h ", "half")
+        skip_kw = (
+            "spread", "handicap", "draw", "both teams", "score first",
+            "o/u", "over/under", "1h ", "2h ", "half",
+            "exact score", "win the ", "win a trophy", "reach the",
+            "appointed", "top scorer", "player of", "qualify",
+            "place ", "finish ", "most goals", "most player",
+            "europa league winner", "conference league winner",
+        )
 
         for tag in _SOCCER_TAGS:
             try:
@@ -166,16 +173,45 @@ class LiveEngine:
                     cid = m.get("conditionId", "")
                     if cid in seen:
                         continue
+                    # Parse clobTokenIds and outcomes (stored as JSON strings or lists)
+                    import json as _json
+                    raw_ids = m.get("clobTokenIds") or []
+                    if isinstance(raw_ids, str):
+                        try:
+                            raw_ids = _json.loads(raw_ids)
+                        except Exception:
+                            raw_ids = []
+                    raw_outcomes = m.get("outcomes") or []
+                    if isinstance(raw_outcomes, str):
+                        try:
+                            raw_outcomes = _json.loads(raw_outcomes)
+                        except Exception:
+                            raw_outcomes = []
+                    if not raw_ids:
+                        continue
                     seen.add(cid)
-                    for token in (m.get("tokens") or []):
-                        tid = token.get("token_id", "")
+                    # Parse outcomePrices for direct PM prices
+                    raw_prices = m.get("outcomePrices") or []
+                    if isinstance(raw_prices, str):
+                        try:
+                            raw_prices = _json.loads(raw_prices)
+                        except Exception:
+                            raw_prices = []
+                    for i, tid in enumerate(raw_ids):
                         if not tid:
                             continue
+                        outcome_label = raw_outcomes[i] if i < len(raw_outcomes) else str(i)
+                        pm_price_cached = 0.0
+                        try:
+                            pm_price_cached = float(raw_prices[i]) if i < len(raw_prices) else 0.0
+                        except (TypeError, ValueError):
+                            pm_price_cached = 0.0
                         candidates.append({
-                            "token_id": tid,
+                            "token_id":  tid,
                             "question":  m.get("question", ""),
-                            "outcome":   token.get("outcome", ""),
+                            "outcome":   outcome_label,
                             "category":  tag,
+                            "pm_price":  pm_price_cached,  # from Gamma API
                         })
 
         self._pm_cache = (now, candidates)
@@ -210,10 +246,15 @@ class LiveEngine:
         self._price_cache[token_id] = (now, price)
         return price
 
+    @staticmethod
+    def _norm(s: str) -> str:
+        """Normalize unicode: remove accents, lowercase."""
+        return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower()
+
     def _team_match(self, team: str, text: str) -> bool:
-        """Fuzzy: meaningful parts of team name found in text."""
-        t = text.lower()
-        tl = team.lower()
+        """Fuzzy: meaningful parts of team name found in text (accent-insensitive)."""
+        t = self._norm(text)
+        tl = self._norm(team)
         if tl in t:
             return True
         parts = [p for p in tl.split() if len(p) > 2]
@@ -224,18 +265,47 @@ class LiveEngine:
     def _match_candidates(
         self, fixture: SMFixture, candidates: list[dict]
     ) -> list[tuple[dict, str]]:
-        """Return (candidate, side='home'|'away') for matches."""
+        """
+        Return (candidate, side='home'|'away') for matches.
+        Handles two market formats:
+          1. "Will X win on DATE?" → outcome Yes/No (Polymarket UCL style)
+          2. "X vs Y" → outcome = team name
+        Only returns the YES/winning side.
+        """
         results = []
         for c in candidates:
             q = c["question"]
-            if not (self._team_match(fixture.home_team, q)
-                    and self._team_match(fixture.away_team, q)):
-                continue
-            outcome = c["outcome"]
-            if self._team_match(fixture.home_team, outcome):
-                results.append((c, "home"))
-            elif self._team_match(fixture.away_team, outcome):
-                results.append((c, "away"))
+            outcome = (c["outcome"] or "").lower()
+
+            # Format 1: "Will X win on YYYY-MM-DD?" — outcome is Yes/No
+            # Require "win on" + date pattern to avoid tournament/other markets
+            if outcome == "yes":
+                import re as _re
+                # Must be "win on YYYY-MM-DD" market
+                date_m = _re.search(r"win on (\d{4}-\d{2}-\d{2})", q.lower())
+                if not date_m:
+                    continue
+                # Date must match fixture game_date (if known)
+                if fixture.game_date and date_m.group(1) != fixture.game_date:
+                    continue
+                home_in_q = self._team_match(fixture.home_team, q)
+                away_in_q = self._team_match(fixture.away_team, q)
+                if home_in_q and not away_in_q:
+                    results.append((c, "home"))
+                elif away_in_q and not home_in_q:
+                    results.append((c, "away"))
+                # if both teams in question → ambiguous, skip
+            elif outcome == "no":
+                continue  # we never want to buy "No" (team loses)
+            else:
+                # Format 2: "X vs Y" — both teams in question, outcome = team name
+                if not (self._team_match(fixture.home_team, q)
+                        and self._team_match(fixture.away_team, q)):
+                    continue
+                if self._team_match(fixture.home_team, outcome):
+                    results.append((c, "home"))
+                elif self._team_match(fixture.away_team, outcome):
+                    results.append((c, "away"))
         return results
 
     def _xg_signal(self, fixture: SMFixture, side: str) -> str:
@@ -338,7 +408,8 @@ class LiveEngine:
                     continue  # only trade the leader
 
                 token_id = cand["token_id"]
-                pm_price = self._get_pm_price(token_id)
+                # Use Gamma price (fast), fallback to CLOB
+                pm_price = cand.get("pm_price") or self._get_pm_price(token_id)
                 if pm_price <= 0.05 or pm_price >= 0.97:
                     continue
 
