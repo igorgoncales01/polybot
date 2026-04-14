@@ -436,9 +436,22 @@ async function closeAll(){
 
 window.addEventListener('load',function(){
   initChart();
-  log('PolyBot v2.4 - PAPER TRADING','info');
+  log('PolyBot v2.5 - PAPER TRADING','info');
   log('Kelly + Trailing Stop + Edge Detection + Time Decay','info');
   log('Precos reais da Polymarket, saldo simulado $10,000','info');
+  // Auto-sync state with server on page load
+  fetch(API+'/api/paper').then(r=>r.json()).then(function(d){
+    if(d.running){
+      state.running=true;
+      var btn=document.getElementById('btn-start');
+      var dot=document.getElementById('live-dot');
+      btn.textContent='PAUSAR'; btn.className='btn danger';
+      dot.style.background='var(--accent)';
+      pollPaper();
+      state.timer=setInterval(pollPaper, cfg('cfg-interval')*1000);
+      log('Bot ja rodando no servidor — sincronizado','ok');
+    }
+  }).catch(function(){});
 });
 </script>
 </body>
