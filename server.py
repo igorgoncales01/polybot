@@ -170,6 +170,7 @@ def main():
     print(f"PolyBot server on http://localhost:{port}")
     print(f"Dashboard: http://localhost:{port}/polybot.html")
     print(f"Paper API: /api/paper | /api/paper/start | /api/paper/stop")
+    start_paper()  # auto-start on boot
     server.serve_forever()
 
 
