@@ -1,0 +1,7 @@
+paper_trades.json
+__pycache__/
+*.pyc
+.env
+polybot.log
+/tmp/
+miniconda3/
