@@ -30,6 +30,7 @@ MAX_SPREAD_CENTS = 5.0    # max 5¢ spread
 MAX_SLIPPAGE_PCT = 8.0    # max 8% slippage on simulated fill
 MAX_ENTRIES_PER_MARKET = 2 # max reentries on same market/side
 TRAILING_TRIGGER = 0.03    # when price rises +3¢, move SL to breakeven
+REENTRY_COOLDOWN = 300     # seconds to wait after closing before re-entering same market
 
 logger = logging.getLogger("polybot.paper")
 
@@ -89,6 +90,7 @@ class PaperTrader:
         self.entry_counts: dict[str, int] = {}  # question -> count of entries
         self.traded_conditions: set[str] = set()  # condition_ids already traded (persist across restarts)
         self._low_price_strikes: dict[str, int] = {}  # token_id -> consecutive scans below 1¢
+        self._close_cooldowns: dict[str, float] = {}  # question[:50] -> last close timestamp
         self.feed = PriceFeed()
         self.feed.start()
         self._load_trades()
@@ -149,6 +151,7 @@ class PaperTrader:
                     del self.positions[tid]
                     self.traded_conditions.discard(pos.condition_id)
                     self._low_price_strikes.pop(tid, None)
+                    self._close_cooldowns[pos.question[:50]] = time.time()
                     logger.info("EXPIRED %s: price=%.2f¢ pnl=$%.2f", pos.outcome, current_price * 100, pnl)
                     events.append({"type": "SELL", "reason": "MARKET_EXPIRED", "outcome": pos.outcome,
                                    "question": pos.question[:50], "pnl": round(pnl, 2)})
@@ -213,6 +216,7 @@ class PaperTrader:
                 self.trades.append(trade)
                 del self.positions[tid]
                 self.traded_conditions.discard(pos.condition_id)
+                self._close_cooldowns[pos.question[:50]] = time.time()
                 if pnl > 0:
                     self.entry_counts[pos.question[:50]] = 0  # win resets counter
 
@@ -254,6 +258,7 @@ class PaperTrader:
                 and c.condition_id not in self.traded_conditions  # never trade both sides
                 and MIN_PRICE <= c.price <= MAX_PRICE
                 and self.entry_counts.get(c.question[:50], 0) < MAX_ENTRIES_PER_MARKET  # limit reentries
+                and (time.time() - self._close_cooldowns.get(c.question[:50], 0)) > REENTRY_COOLDOWN  # cooldown após fechar
             ]
             eligible.sort(key=lambda c: c.price)
 
