@@ -15,9 +15,10 @@ import logging
 
 logger = logging.getLogger("polybot.kelly")
 
-KELLY_FRACTION = 0.25  # use 1/4 Kelly to reduce variance
+KELLY_FRACTION = 0.15  # use 15% Kelly to reduce variance
 MIN_BET_USD = 10.0
-MAX_BET_PCT = 0.05     # never bet more than 5% of bankroll
+MAX_BET_PCT = 0.015    # never bet more than 1.5% of bankroll
+MAX_BET_USD = 150.0    # absolute cap per trade
 
 
 def kelly_size(fair_price: float, poly_price: float, bankroll: float) -> float:
@@ -54,6 +55,7 @@ def kelly_size(fair_price: float, poly_price: float, bankroll: float) -> float:
     f = min(f, MAX_BET_PCT)
 
     bet = round(bankroll * f, 2)
+    bet = min(bet, MAX_BET_USD)  # absolute cap
     bet = max(bet, MIN_BET_USD) if bet > MIN_BET_USD * 0.5 else 0.0
 
     logger.info(
