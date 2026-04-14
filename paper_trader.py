@@ -113,9 +113,12 @@ class PaperTrader:
         # 1. Check exits using REAL-TIME WebSocket prices (instant, no HTTP)
         for tid, pos in list(self.positions.items()):
             ws_price = self.feed.get_price(tid)
-            current_price = ws_price.mid if ws_price else 0
-            if not current_price:
-                # HTTP fallback: check CLOB midpoint for dead markets with no WS feed
+            # Use WS price only if fresh (updated within last 60s)
+            if ws_price and (time.time() - ws_price.last_update) < 60:
+                current_price = ws_price.mid
+            else:
+                # HTTP fallback: WS is stale or absent (dead/resolved market)
+                current_price = 0
                 try:
                     import httpx as _httpx
                     r = _httpx.get(
@@ -126,7 +129,7 @@ class PaperTrader:
                 except Exception:
                     pass
             if not current_price:
-                continue  # still no price, skip
+                continue  # no price available, skip
 
             # ── MARKET EXPIRED: close if price < 1¢ for 2+ consecutive scans ──
             if current_price < 0.01:
