@@ -23,6 +23,7 @@ logging.basicConfig(
 from scanner import scan_markets
 from paper_trader import PaperTrader
 from edge_detector import get_all_live_edges
+import live_engine
 
 # ── Shared state ──────────────────────────────────────────────────
 _cache = {"candidates": [], "last_scan": 0, "scan_count": 0}
@@ -145,6 +146,9 @@ class Handler(SimpleHTTPRequestHandler):
             reset_paper()
             return self._json_response({"status": "reset"})
 
+        if path == "/api/live-engine":
+            return self._json_response(live_engine.get_state())
+
         if path == "/api/edge":
             # Show all candidates with edge analysis
             _refresh_if_stale()
@@ -170,7 +174,8 @@ def main():
     print(f"PolyBot server on http://localhost:{port}")
     print(f"Dashboard: http://localhost:{port}/polybot.html")
     print(f"Paper API: /api/paper | /api/paper/start | /api/paper/stop")
-    start_paper()  # auto-start on boot
+    start_paper()        # auto-start paper trader
+    live_engine.start()  # auto-start live soccer engine
     server.serve_forever()
 
 

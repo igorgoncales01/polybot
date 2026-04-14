@@ -185,6 +185,7 @@
       <div style="display:flex;gap:12px;align-items:center;">
         <button class="tab-btn active" id="tab-open" onclick="switchTab('open')">Posicoes Abertas (<span id="tab-open-count">0</span>)</button>
         <button class="tab-btn" id="tab-closed" onclick="switchTab('closed')">Historico (<span id="tab-closed-count">0</span>)</button>
+        <button class="tab-btn" id="tab-test" onclick="switchTab('test')">&#x1F52C; Teste (<span id="tab-test-count">0</span>)</button>
       </div>
       <div id="scan-status" class="scan-badge">IDLE</div>
     </div>
@@ -209,6 +210,28 @@
         </thead>
         <tbody id="closed-feed">
           <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Nenhum trade fechado</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="view-test" style="display:none;">
+      <div style="padding:8px 0 10px;display:flex;gap:16px;align-items:center;font-size:10px;color:var(--muted2);">
+        <span>Motor: <span id="le-status" style="color:var(--muted)">–</span></span>
+        <span>Ciclos: <span id="le-cycles">0</span></span>
+        <span>Update: <span id="le-update">–</span></span>
+        <span style="margin-left:auto;">
+          <span style="color:var(--green)">★★ A: <span id="le-a">0</span></span> &nbsp;
+          <span style="color:var(--accent2)">★ B: <span id="le-b">0</span></span> &nbsp;
+          <span style="color:var(--muted)">— Skip: <span id="le-skip">0</span></span>
+        </span>
+      </div>
+      <table class="trade-table" id="test-table">
+        <thead>
+          <tr>
+            <th>Grade</th><th>Jogo</th><th>Min</th><th>Placar</th><th>Lag</th><th>xG</th><th>PM</th><th>Live</th><th>Entrada?</th>
+          </tr>
+        </thead>
+        <tbody id="test-feed">
+          <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px;">Aguardando sinais do motor ao vivo...</td></tr>
         </tbody>
       </table>
     </div>
@@ -373,10 +396,60 @@ function moveTooltip(e) {
 function hideTooltip() { tt.classList.remove('show'); }
 
 function switchTab(tab){
-  document.getElementById('tab-open').className='tab-btn'+(tab==='open'?' active':'');
-  document.getElementById('tab-closed').className='tab-btn'+(tab==='closed'?' active':'');
+  ['open','closed','test'].forEach(function(t){
+    document.getElementById('tab-'+t).className='tab-btn'+(tab===t?' active':'');
+  });
   document.getElementById('view-open').style.display=tab==='open'?'block':'none';
   document.getElementById('view-closed').style.display=tab==='closed'?'block':'none';
+  document.getElementById('view-test').style.display=tab==='test'?'block':'none';
+  if(tab==='test') pollLiveEngine();
+}
+
+function renderTestSignals(d){
+  document.getElementById('le-status').textContent = d.running ? '🟢 ON' : '⭕ OFF';
+  document.getElementById('le-status').style.color = d.running ? 'var(--green)' : 'var(--red)';
+  document.getElementById('le-cycles').textContent = d.cycles || 0;
+  document.getElementById('le-update').textContent = d.last_update || '–';
+  document.getElementById('le-a').textContent    = d.grade_a    || 0;
+  document.getElementById('le-b').textContent    = d.grade_b    || 0;
+  document.getElementById('le-skip').textContent = d.grade_skip || 0;
+  document.getElementById('tab-test-count').textContent = (d.grade_a||0)+(d.grade_b||0);
+
+  var tbody = document.getElementById('test-feed');
+  tbody.innerHTML = '';
+  var sigs = d.signals || [];
+  if(!sigs.length){
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px;">Sem sinais ainda — aguardando jogos ao vivo</td></tr>';
+    return;
+  }
+  sigs.forEach(function(s){
+    var gradeColor = s.grade==='A' ? 'var(--green)' : s.grade==='B' ? '#4d9fff' : 'var(--muted)';
+    var gradeIcon  = s.grade==='A' ? '★★ A' : s.grade==='B' ? '★ B' : '—';
+    var lagColor   = s.lag_cents >= 12 ? 'var(--green)' : s.lag_cents >= 8 ? 'var(--warn)' : 'var(--muted2)';
+    var xgColor    = s.xg_signal==='STRONG' ? 'var(--green)' : s.xg_signal==='WEAK' ? 'var(--red)' : 'var(--muted2)';
+    var entryStr   = s.would_enter ? '<span style="color:var(--green);font-weight:600">SIM</span>' : '<span style="color:var(--muted)">não</span>';
+    var row = document.createElement('tr');
+    row.innerHTML =
+      '<td style="color:'+gradeColor+';font-weight:600;">'+gradeIcon+'</td>'+
+      '<td class="market">&#x26BD; '+s.game+'</td>'+
+      '<td style="color:var(--text);">'+s.minute+"'"+' '+s.period+'</td>'+
+      '<td style="color:var(--accent);font-weight:500;">'+s.score+'</td>'+
+      '<td style="color:'+lagColor+';font-weight:500;">+'+s.lag_cents.toFixed(1)+'¢</td>'+
+      '<td style="color:'+xgColor+';">'+s.xg_signal+'</td>'+
+      '<td style="color:var(--muted2);">'+(s.pm_price*100).toFixed(1)+'¢</td>'+
+      '<td style="color:var(--accent2);">'+(s.live_prob*100).toFixed(1)+'¢</td>'+
+      '<td>'+entryStr+'</td>';
+    tbody.appendChild(row);
+  });
+}
+
+async function pollLiveEngine(){
+  try {
+    var resp = await fetch(API+'/api/live-engine');
+    if(!resp.ok) return;
+    var d = await resp.json();
+    renderTestSignals(d);
+  } catch(e){}
 }
 
 function renderTable(d){
@@ -587,6 +660,10 @@ window.addEventListener('load',function(){
       log('Bot ja rodando no servidor — sincronizado','ok');
     }
   }).catch(function(){});
+  // Poll live engine every 30s (refresh when on test tab)
+  setInterval(function(){
+    if(document.getElementById('tab-test').classList.contains('active')) pollLiveEngine();
+  }, 30000);
 });
 </script>
 </body>

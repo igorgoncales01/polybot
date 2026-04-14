@@ -27,6 +27,9 @@ TARGET_CATEGORIES = ["soccer", "nba", "nhl", "tennis", "esports"]
 # Live market filter
 MAX_HOURS_TO_END = float(os.getenv("MAX_HOURS_TO_END", "0"))  # 0 = disabled
 
+# SportMonks API (live soccer engine)
+SPORTMONKS_API_KEY = os.getenv("SPORTMONKS_API_KEY", "")
+
 # Logging
 LOG_FILE = os.getenv("LOG_FILE", "polybot.log")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
