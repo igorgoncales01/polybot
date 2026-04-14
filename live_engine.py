@@ -93,6 +93,7 @@ _lock    = threading.Lock()
 _running = False
 _cycles  = 0
 _last_update = ""
+_live_fixture_count = 0  # fixtures found in last cycle
 _thread: threading.Thread | None = None
 
 
@@ -278,18 +279,23 @@ class LiveEngine:
     # ── Main cycle ─────────────────────────────────────────────────────────
 
     def run_cycle(self) -> list[LiveSignal]:
-        global _cycles, _last_update
+        global _cycles, _last_update, _live_fixture_count
 
-        fixtures  = sm_client.get_live_fixtures()
+        fixtures   = sm_client.get_live_fixtures()
         candidates = self._get_pm_candidates()
 
+        _cycles += 1
+        _last_update = time.strftime("%H:%M:%S")
+        _live_fixture_count = len(fixtures)
+
         if not fixtures:
-            logger.debug("No live fixtures")
+            logger.debug("Cycle %d: no live fixtures from SportMonks", _cycles)
             return []
         if not candidates:
-            logger.debug("No PM candidates")
+            logger.debug("Cycle %d: no PM soccer candidates", _cycles)
             return []
 
+        logger.debug("Cycle %d: %d live fixtures, %d PM candidates", _cycles, len(fixtures), len(candidates))
         cycle_signals: list[LiveSignal] = []
 
         for fixture in fixtures:
@@ -383,9 +389,6 @@ class LiveEngine:
                     "WOULD ENTER: " + cand["outcome"] if would_enter else "skip",
                 )
 
-        _cycles += 1
-        _last_update = time.strftime("%H:%M:%S")
-
         with _lock:
             _signals.extend(cycle_signals)
             if len(_signals) > MAX_SIGNALS:
@@ -436,12 +439,13 @@ def get_state() -> dict:
     b    = sum(1 for s in sigs if s.grade == "B")
     skip = sum(1 for s in sigs if s.grade == "SKIP")
     return {
-        "running":       _running,
-        "cycles":        _cycles,
-        "last_update":   _last_update,
-        "total_signals": len(sigs),
-        "grade_a":  a,
-        "grade_b":  b,
+        "running":            _running,
+        "cycles":             _cycles,
+        "last_update":        _last_update,
+        "live_fixture_count": _live_fixture_count,
+        "total_signals":      len(sigs),
+        "grade_a":   a,
+        "grade_b":   b,
         "grade_skip": skip,
         "signals": [s.to_dict() for s in reversed(sigs)],  # newest first
     }

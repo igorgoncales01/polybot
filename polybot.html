@@ -217,6 +217,7 @@
       <div style="padding:8px 0 10px;display:flex;gap:16px;align-items:center;font-size:10px;color:var(--muted2);">
         <span>Motor: <span id="le-status" style="color:var(--muted)">–</span></span>
         <span>Ciclos: <span id="le-cycles">0</span></span>
+        <span>Jogos ao vivo: <span id="le-fixtures" style="color:var(--accent)">–</span></span>
         <span>Update: <span id="le-update">–</span></span>
         <span style="margin-left:auto;">
           <span style="color:var(--green)">★★ A: <span id="le-a">0</span></span> &nbsp;
@@ -409,6 +410,7 @@ function renderTestSignals(d){
   document.getElementById('le-status').textContent = d.running ? '🟢 ON' : '⭕ OFF';
   document.getElementById('le-status').style.color = d.running ? 'var(--green)' : 'var(--red)';
   document.getElementById('le-cycles').textContent = d.cycles || 0;
+  document.getElementById('le-fixtures').textContent = d.live_fixture_count !== undefined ? d.live_fixture_count : '–';
   document.getElementById('le-update').textContent = d.last_update || '–';
   document.getElementById('le-a').textContent    = d.grade_a    || 0;
   document.getElementById('le-b').textContent    = d.grade_b    || 0;
@@ -419,7 +421,10 @@ function renderTestSignals(d){
   tbody.innerHTML = '';
   var sigs = d.signals || [];
   if(!sigs.length){
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px;">Sem sinais ainda — aguardando jogos ao vivo</td></tr>';
+    var noGameMsg = (d.live_fixture_count === 0)
+      ? 'SportMonks: nenhum jogo ao vivo agora. Jogos UCL/Liga geralmente 19h-22h CET.'
+      : 'Jogos encontrados, aguardando 2T min 65+ com gol...';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px;">'+noGameMsg+'</td></tr>';
     return;
   }
   sigs.forEach(function(s){
