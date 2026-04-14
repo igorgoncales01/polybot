@@ -115,7 +115,18 @@ class PaperTrader:
             ws_price = self.feed.get_price(tid)
             current_price = ws_price.mid if ws_price else 0
             if not current_price:
-                continue  # no WS data yet, skip
+                # HTTP fallback: check CLOB midpoint for dead markets with no WS feed
+                try:
+                    import httpx as _httpx
+                    r = _httpx.get(
+                        f"https://clob.polymarket.com/midpoint?token_id={tid}",
+                        timeout=5,
+                    )
+                    current_price = float(r.json().get("mid", 0))
+                except Exception:
+                    pass
+            if not current_price:
+                continue  # still no price, skip
 
             # ── MARKET EXPIRED: close if price < 1¢ for 2+ consecutive scans ──
             if current_price < 0.01:
